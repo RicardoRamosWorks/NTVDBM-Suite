@@ -2,6 +2,4 @@
 	path = ntvdbm
 	url = https://github.com/ricardoramosworks/ntvdbm.git
 
-[submodule "winbox"]
-	path = winbox
-	url =  https://github.com/RicardoRamosWorks/winbox.git
+
