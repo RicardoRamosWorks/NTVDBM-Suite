@@ -1,41 +1,35 @@
 # NTVDBM Suite
- 
-![Imagem](https://raw.githubusercontent.com/RicardoRamosWorks/ricardoramosworks.github.io/refs/heads/main/Images/ntVDBM.png)
 
-NT Virtual DosBox Machine Suite: This is a project that aims to transparently replace NTDVM with DOSBox. Developed for use in XP installations with UEFI, as a solution for playing Doom.
+![Image](https://raw.githubusercontent.com/RicardoRamosWorks/ricardoramosworks.github.io/refs/heads/main/Images/ntVDBM.png)
 
-My handler  runs MS-DOS applications without the need for NTVDM (since the Apple TV doesn't support BIOS). Furthermore, it creates a configuration file per folder (the configuration files are located in system32, but it creates a shortcut in the folder for them). The configuration files are created using the folder name + crc16 hash to ensure it's not the same game. The configuration file is global for the game folder (for example, c:\games\doom); all other executables (like setup.exe) will also use the same configuration file.
+NT Virtual DosBox Machine Suite: This project aims to transparently replace NTVDM with DOSBox. It was developed for use on UEFI-based Windows XP installations, serving as a solution for playing Doom.
 
-There's also my "shortcut creator" system. Unfortunately, due to limitations in how Windows handles DOS applications, it's impossible to create a shortcut for a 16-bit executable without it becoming a PIF (Processed Intent File). PIFs depend on NTVDM, so this forced me to write a completely new solution from scratch, which was great because I was able to make improvements. The global context menu now has an item that creates a shortcut to the game on the desktop. It actually creates a .bat file with the game's name. This .bat file handles starting the game correctly, then it creates a shortcut to this .bat file on the desktop. But not only that, it will also automatically set the icon if the corresponding icon exists in the icons folder. 
+My handler executes MS-DOS applications without requiring NTVDM (since Apple TV does not support BIOS). Additionally, it creates a per-application configuration file (config files are stored in the `system32` folder, but the system creates a shortcut to them inside the app/game folder). Configuration files (and icons) are generated using a CRC16 hash to ensure unique identification for each game.
 
-To better understand: There's an icons folder in system32 called gameicons, inside it there's default.ico and icons for some games I've already created. If you create a shortcut for doom.exe, this handler will copy default.ico to doom+hash.ico. The hash is calculated based on the executable file, so icons can be shared among users to form a large icon library. I'm creating icons for the games I own and use, and I'll make them available together. If an icon already exists in the icon folder with the game's name and hash, the shortcut is created with the correct icon!
+There is also my "shortcut creation" system. Unfortunately, due to limitations in how Windows handles DOS applications, it is impossible to create a shortcut to a 16-bit executable without it turning into a PIF (*Processed Intent File*). PIF files rely on NTVDM; this forced me to write a completely new solution from scratch—which turned out to be a good thing, as it allowed me to implement improvements. The global context menu now includes an option to create a desktop shortcut for the game. This shortcut launches NTVDBM or Winbox.exe, passing the target object and its corresponding configuration file as arguments. Furthermore, the system automatically assigns an icon if a matching one exists in the icons folder or the directory containing the executable.
 
-When you click on the game, DOSBox is called with all the arguments and path to run the game correctly. When the game finishes, it automatically receives the exit command and returns to the desktop.
+To clarify: there is an `icons` folder within `system32` named `gameicons`; inside, there is a `default***.ico` file and icons for some games I have already configured. If you create a shortcut for `doom.exe`, the handler copies `default***.ico` to `doom+hash.ico`. The hash is calculated based on the executable file, allowing icons to be shared among users to build a large icon library. I am creating icons for the games I own and play, and I plan to make them available in a collective pack. If an icon matching the game's name and hash already exists in the icon folder, the shortcut will be created using the correct icon! Additionally, if an .ico file is already present in the game folder, the handler will associate that icon with the shortcut. This works for everything: MS-DOS, Win16, and Win32 applications.
 
-It has a refined executable detection system to correctly differentiate between 32-bit and 16-bit (Windows 3.1) executables and 16-bit MS-DOS executables.
+When you click on a game, my custom DOSBox build is launched with all the necessary arguments and paths to run it correctly. When the game ends, it automatically receives an exit command and returns to the desktop.
 
-Currently, all MS-DOS executables and combos work wonderfully. But 16-bit Windows executables don't work; I'm working on a "winbox.exe" to work around this.
+The system features a refined executable detection mechanism that accurately distinguishes between 32-bit executables, 16-bit Windows (Windows 3.1) executables, and 16-bit MS-DOS executables.
 
-The project has a selection of pre-configured icons for some classic games I own. It's not guaranteed that your doom.exe will appear with the correct icon, as the icon is associated with the executable via checksum. So, if your doom.exe is a different version than the one I used, you will have to create the icon for your executable.
+Currently, all MS-DOS executables and related configurations work perfectly. 16-bit executables are redirected to Winbox—which is also based on DOSBox but includes various modifications to serve as a dedicated tool for Windows 3.1. If Winbox is launched with an executable as an argument, it quickly starts the 16-bit environment and launches the 16-bit executable within that window. The host's C:\ drive is correctly mapped as the C: drive, allowing you to install games using 16-bit installers. The W: drive is where Windows 3.1 runs. If Winbox is launched without arguments, Program Manager starts, allowing you to use Windows 3.1 normally. Windows 3.1 is located at c:\windows\system32\winbox\ on the host system. I recommend using a solid Windows 3.1 installation—fully updated with components like WinG, Video for Windows, and QuickTime—to ensure compatibility with early FMV games.
 
-## USAGE:
+I created this setup based on Windows 3.11, but unfortunately, I cannot distribute it with my project; even though it is considered abandonware, Microsoft still holds the rights.
 
-You need to download dosbox yourself, and place the executable and configuration files in system32, such as "dosbox.exe" and "dosbox.conf". Then, copy the files from this project (the gameicons folder, config, hdl.exe, and sendtotool.exe) to system32 as well. Merge the install.reg registry file (just double-click it), and everything will be ready.
+The project includes a selection of pre-configured icons for some classic games I own. There is no guarantee that your `doom.exe` will display the correct icon, as the icon is linked to the executable via a checksum. Therefore, if your `doom.exe` is from a different version than the one I used, you will need to create an icon for your specific executable.
 
-There are two other registry files, enable handler and disable handler; they act as the on/off switch for everything. Some specific programs may not work well with my project, so you may need to disable them before running certain software (such as DrivePack Solution).
+## HOW TO USE:
+
+Download and extract the files to the `System32` folder of your Windows XP installation. Merge the `install.reg` registry file (simply double-click it), and you're all set.
+
+There are two other registry files: one to enable the handler and another to disable it; these act as a system-wide on/off switch. Certain programs might not work correctly while my handler is intercepting calls, so you may need to disable it before running specific software (though I have refined it significantly to avoid issues during my testing).
 
 ## Creating Icons
 
-"Create" wouldn't be the ideal word, but I couldn't find another. You don't necessarily need to create an icon from scratch. When you create a shortcut, the handler will copy default16.ico or default32.ico to a new file; the file name will be the same as the executable+hash. If a doom+hash.ico file already exists in the folder, but your shortcut to doom didn't receive the correct icon, your executable version is different and generated a different hash. To solve this, simply find the generic icon for doom+hash.ico, copy the icon with the image you want, and rename it accordingly.
+"Creating" might not be the perfect word, but I couldn't think of a better one....better. You don't necessarily need to create an icon from scratch. When creating a shortcut, the handler copies the `default_dos.ico`, `default_win16.ico`, or `default_win32.ico` file to a new file; the filename will match the executable's name plus a hash. If a `doom+hash.ico` file already exists in the folder but your Doom shortcut didn't get the correct icon, it means your executable version is different and generated a distinct hash. To fix this, simply locate the generic `doom+hash.ico` file, copy the icon containing the desired image, and rename it accordingly.
 
 ## Compatibility
 
-All the games I tested from 1987 to 1999 ran perfectly (in the sense that there were no problems with the handler), I believe I achieved 100% compatibility with anything that should run in DOSBox.
-
-Win32 executables are passed to the kernel normally; I believe I've fixed the problem with too many arguments in the call, so the handler (so far) no longer needs to be disabled for compatibility. The Shortcut Creator also differentiates between MSDOS icons and Windows icons when creating the generic icon.
-
-## The future
-
-I intend to scale this project to something much larger, creating a universal game launcher using only Windows shell resources – something Windows should have had since Windows 98, in my opinion – a CLSID folder (a system folder, like My Documents or My Computer) that stores game shortcuts, but not that awful thing that Windows Vista and 7 had. I'd like something that creates shortcuts within it, and that uses a database containing information about the game, such as year, developer, publisher, screenshot, cover art, etc., all directly in the Explorer shell, and built in a simple way, with fast and transparent execution.
-
-I've had this idea for many years. I tried using Launchbox; in my opinion, it's excellent, but very bloated and extremely heavy for a simple, old machine. I'm the guy who hates hardware obsolescence. I believe it's VERY important to find ways to reuse old hardware. Humanity is heading towards stupidity with the excess of interpreted languages; the web has become something ridiculous that requires 8GB of RAM to access a Wikipedia page. Old games are the main and most obvious way to make this hardware useful and durable.
+All the games I tested—released between 1987 and 1999—ran perfectly (meaning there were no issues with the handler); I believe I have achieved 100% compatibility with any game designed to run in DOSBox.
