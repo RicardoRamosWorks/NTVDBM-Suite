@@ -1,3 +1,6 @@
+#define INITGUID
+
+#include <initguid.h>
 #include <windows.h>
 #include <shlobj.h>
 #include <shlwapi.h>
@@ -9,38 +12,153 @@
 #pragma comment(lib, "shell32")
 #pragma comment(lib, "shlwapi")
 
-#define ICON_DIR      "C:\\WINDOWS\\SYSTEM32\\gameicons\\"
-///#define DEFAULT_ICON  "C:\\WINDOWS\\SYSTEM32\\gameicons\\default.ico"
+/*=====================================================*/
+/* PATHS */
+/*=====================================================*/
 
-/* ===================================================== */
-/* CRC16 */
-/* ===================================================== */
+#define NTVDBM_PATH "C:\\WINDOWS\\SYSTEM32\\NTVDBM.EXE"
+#define WINBOX_PATH "C:\\WINDOWS\\SYSTEM32\\WINBOX.EXE"
+
+#define ICON_DIR    "C:\\WINDOWS\\SYSTEM32\\gameicons\\"
+#define CONF_DIR    "C:\\WINDOWS\\SYSTEM32\\CONF\\"
+
+#define ICON_DOS   "C:\\WINDOWS\\SYSTEM32\\gameicons\\default_dos.ico"
+#define ICON_WIN16 "C:\\WINDOWS\\SYSTEM32\\gameicons\\default_win16.ico"
+#define ICON_WIN32 "C:\\WINDOWS\\SYSTEM32\\gameicons\\default_win32.ico"
+
+#define DEFAULT_CONF "C:\\WINDOWS\\SYSTEM32\\NTVDBM.CONF"
+
+#define WINBOX_DIR "C:\\WINDOWS\\SYSTEM32\\WINBOX"
+
+/*=====================================================*/
+/* TYPES */
+/*=====================================================*/
+
+#define TYPE_DOS     0
+#define TYPE_WIN32   1
+#define TYPE_WIN16   2
+
+int find_local_icon(
+    const char *target,
+    char *icon
+);
+/*=====================================================*/
+/* FIND LOCAL ICO */
+/*=====================================================*/
+
+int find_local_icon(
+    const char *target,
+    char *icon
+)
+{
+    char dir[MAX_PATH];
+
+    lstrcpyA(
+        dir,
+        target
+    );
+
+    PathRemoveFileSpecA(dir);
+
+    /*=============================================*/
+    /* prioridade:
+       mesmo nome do exe
+    /*=============================================*/
+
+    char exename[MAX_PATH];
+
+    lstrcpyA(
+        exename,
+        PathFindFileNameA(target)
+    );
+
+    PathRemoveExtensionA(exename);
+
+    wsprintfA(
+        icon,
+        "%s\\%s.ico",
+        dir,
+        exename
+    );
+
+    if(
+        GetFileAttributesA(icon)
+        !=
+        INVALID_FILE_ATTRIBUTES
+    )
+    {
+        return 1;
+    }
+
+    /*=============================================*/
+    /* fallback:
+       qualquer .ico
+    /*=============================================*/
+
+    char search[MAX_PATH];
+
+    wsprintfA(
+        search,
+        "%s\\*.ico",
+        dir
+    );
+
+    WIN32_FIND_DATAA fd;
+
+    HANDLE h=
+        FindFirstFileA(
+            search,
+            &fd
+        );
+
+    if(h==INVALID_HANDLE_VALUE)
+        return 0;
+
+    wsprintfA(
+        icon,
+        "%s\\%s",
+        dir,
+        fd.cFileName
+    );
+
+    FindClose(h);
+
+    return 1;
+}
+
+/*=====================================================*/
+/* CRC16 FILE */
+/*=====================================================*/
 
 unsigned short crc16_file(const char *path)
 {
-    FILE *f = fopen(path, "rb");
+    FILE *f=fopen(path,"rb");
 
-    if (!f)
+    if(!f)
         return 0;
 
-    unsigned short crc = 0xFFFF;
+    unsigned short crc=0xFFFF;
 
     unsigned char buffer[4096];
 
-    size_t read;
+    size_t rd;
 
-    while ((read = fread(buffer, 1, sizeof(buffer), f)) > 0)
+    while((rd=fread(buffer,1,sizeof(buffer),f))>0)
     {
-        for (size_t i = 0; i < read; i++)
-        {
-            crc ^= buffer[i];
+        size_t i;
 
-            for (int j = 0; j < 8; j++)
+        for(i=0;i<rd;i++)
+        {
+            crc^=buffer[i];
+
+            int j;
+
+            for(j=0;j<8;j++)
             {
-                if (crc & 1)
-                    crc = (crc >> 1) ^ 0xA001;
+                if(crc&1)
+                    crc=(crc>>1)^0xA001;
                 else
-                    crc >>= 1;
+                    crc>>=1;
             }
         }
     }
@@ -50,89 +168,116 @@ unsigned short crc16_file(const char *path)
     return crc;
 }
 
-/* ===================================================== */
-/* DETECTA PE32 */
-/* ===================================================== */
+/*=====================================================*/
+/* .COM */
+/*=====================================================*/
 
-int is_pe32(const char *path)
+int is_com(const char *path)
 {
-    FILE *f = fopen(path, "rb");
+    const char *e=strrchr(path,'.');
 
-    if (!f)
-        return 1;
+    if(!e)
+        return 0;
+
+    return lstrcmpiA(e,".com")==0;
+}
+
+/*=====================================================*/
+/* DETECTOR */
+/*=====================================================*/
+
+int exe_type(const char *path)
+{
+    FILE *f=fopen(path,"rb");
+
+    if(!f)
+        return TYPE_DOS;
 
     unsigned char mz[2];
 
-    fread(mz, 1, 2, f);
-
-    if (mz[0] != 'M' || mz[1] != 'Z')
+    if(fread(mz,1,2,f)!=2)
     {
         fclose(f);
-        return 1;
+        return TYPE_DOS;
     }
 
-    fseek(f, 0x3C, SEEK_SET);
+    if(mz[0]!='M'||mz[1]!='Z')
+    {
+        fclose(f);
+        return TYPE_DOS;
+    }
 
-    unsigned int pe_offset;
+    fseek(f,0x3C,SEEK_SET);
 
-    fread(&pe_offset, 4, 1, f);
+    unsigned int ofs=0;
 
-    fseek(f, pe_offset, SEEK_SET);
+    fread(&ofs,4,1,f);
 
-    unsigned char pe[2];
+    fseek(f,ofs,SEEK_SET);
 
-    fread(pe, 1, 2, f);
+    unsigned char sig[2]={0};
+
+    fread(sig,1,2,f);
 
     fclose(f);
 
-    if (pe[0] == 'P' && pe[1] == 'E')
-        return 1;
+    if(sig[0]=='P'&&sig[1]=='E')
+        return TYPE_WIN32;
 
-    return 0;
+    if(sig[0]=='N'&&sig[1]=='E')
+        return TYPE_WIN16;
+	
+	if(sig[0]=='L'&&sig[1]=='E')
+		return TYPE_WIN16;
+
+    return TYPE_DOS;
 }
 
-/* ===================================================== */
-/* POSSUI ÍCONE? */
-/* ===================================================== */
+/*=====================================================*/
+/* HAS ICON */
+/*=====================================================*/
 
 int has_icon(const char *path)
 {
-    HICON hLarge = NULL;
-    HICON hSmall = NULL;
+    HICON hLarge=NULL;
+    HICON hSmall=NULL;
 
-    UINT count = ExtractIconExA(
-        path,
-        0,
-        &hLarge,
-        &hSmall,
-        1
-    );
+    UINT count=
+        ExtractIconExA(
+            path,
+            0,
+            &hLarge,
+            &hSmall,
+            1
+        );
 
-    if (hLarge)
+    if(hLarge)
         DestroyIcon(hLarge);
 
-    if (hSmall)
+    if(hSmall)
         DestroyIcon(hSmall);
 
-    return (count > 0);
+    return count>0;
 }
 
-/* ===================================================== */
-/* GERA ÍCONE CRC */
-/* ===================================================== */
+/*=====================================================*/
+/* BUILD ICON */
+/*=====================================================*/
 
 void build_icon_path(
     const char *target,
+    unsigned short crc,
     char *iconpath
 )
 {
     char name[MAX_PATH];
 
-    lstrcpy(name, PathFindFileNameA(target));
+    lstrcpyA(
+        name,
+        PathFindFileNameA(target)
+    );
 
     PathRemoveExtensionA(name);
-
-    unsigned short crc = crc16_file(target);
 
     wsprintfA(
         iconpath,
@@ -142,26 +287,38 @@ void build_icon_path(
         crc
     );
 
-    /* já existe? usa */
-    if (GetFileAttributesA(iconpath) != INVALID_FILE_ATTRIBUTES)
+    if(
+        GetFileAttributesA(iconpath)
+        !=
+        INVALID_FILE_ATTRIBUTES
+    )
         return;
-
-    /* escolhe template */
 
     char source[MAX_PATH];
 
-    if (is_pe32(target))
+    int type=
+        exe_type(target);
+
+    if(type==TYPE_WIN32)
     {
-        lstrcpy(
+        lstrcpyA(
             source,
-            "C:\\WINDOWS\\SYSTEM32\\gameicons\\default32.ico"
+            ICON_WIN32
+        );
+    }
+    else
+    if(type==TYPE_WIN16)
+    {
+        lstrcpyA(
+            source,
+            ICON_WIN16
         );
     }
     else
     {
-        lstrcpy(
+        lstrcpyA(
             source,
-            "C:\\WINDOWS\\SYSTEM32\\gameicons\\default16.ico"
+            ICON_DOS
         );
     }
 
@@ -172,22 +329,33 @@ void build_icon_path(
     );
 }
 
-/* ===================================================== */
-/* NOME ÚNICO */
-/* ===================================================== */
+/*=====================================================*/
+/* UNIQUE SHORTCUT */
+/*=====================================================*/
 
 void build_unique_shortcut(
-    const char *desktop,
-    const char *name,
-    char *out
+const char *desktop,
+const char *name,
+char *out
 )
 {
-    wsprintfA(out, "%s\\%s.lnk", desktop, name);
+    wsprintfA(
+        out,
+        "%s\\%s.lnk",
+        desktop,
+        name
+    );
 
-    if (GetFileAttributesA(out) == INVALID_FILE_ATTRIBUTES)
+    if(
+        GetFileAttributesA(out)
+        ==
+        INVALID_FILE_ATTRIBUTES
+    )
         return;
 
-    for (int i = 2; i < 1000; i++)
+    int i;
+
+    for(i=2;i<1000;i++)
     {
         wsprintfA(
             out,
@@ -197,88 +365,58 @@ void build_unique_shortcut(
             i
         );
 
-        if (GetFileAttributesA(out) == INVALID_FILE_ATTRIBUTES)
+        if(
+            GetFileAttributesA(out)
+            ==
+            INVALID_FILE_ATTRIBUTES
+        )
             return;
     }
 }
 
-/* ===================================================== */
-/* CRIA BAT */
-/* ===================================================== */
-
-void create_bat(
-    const char *gamepath,
-    char *batpath
-)
-{
-    char dir[MAX_PATH];
-    char exe[MAX_PATH];
-
-    lstrcpy(dir, gamepath);
-
-    char *slash = strrchr(dir, '\\');
-
-    if (!slash)
-        return;
-
-    lstrcpy(exe, slash + 1);
-
-    *slash = 0;
-
-    char name[MAX_PATH];
-
-    lstrcpy(name, exe);
-
-    PathRemoveExtensionA(name);
-
-    wsprintfA(
-        batpath,
-        "%s\\%s.bat",
-        dir,
-        name
-    );
-
-    FILE *f = fopen(batpath, "w");
-
-if (!f)
-    return;
-
-fprintf(f, "@echo off\n");
-fprintf(f, "cd /d \"%%~dp0\"\n");
-fprintf(f, "start \"\" /min \"%s\"\n", exe);
-fprintf(f, "exit\n");
-
-    fclose(f);
-}
-
-/* ===================================================== */
+/*=====================================================*/
 /* MAIN */
-/* ===================================================== */
+/*=====================================================*/
 
 int WINAPI WinMain(
-    HINSTANCE hInst,
-    HINSTANCE hPrev,
-    LPSTR lpCmdLine,
-    int nShow
+HINSTANCE hInst,
+HINSTANCE hPrev,
+LPSTR lpCmdLine,
+int nShow
 )
 {
-    if (!lpCmdLine || !lpCmdLine[0])
+    if(
+        !lpCmdLine
+        ||
+        !lpCmdLine[0]
+    )
         return 0;
 
     char target[MAX_PATH];
 
-    lstrcpy(target, lpCmdLine);
+    lstrcpyA(
+        target,
+        lpCmdLine
+    );
 
-    /* remove aspas */
+    /* remove quotes */
 
-    if (target[0] == '"')
+    if(target[0]=='"')
     {
-        memmove(target, target + 1, strlen(target));
+        memmove(
+            target,
+            target+1,
+            strlen(target)
+        );
 
-        char *q = strrchr(target, '"');
+        char *q=
+            strrchr(
+                target,
+                '"'
+            );
 
-        if (q)
-            *q = 0;
+        if(q)
+            *q=0;
     }
 
     char full[MAX_PATH];
@@ -290,9 +428,9 @@ int WINAPI WinMain(
         NULL
     );
 
-    /* =====================================================
-       desktop
-    ===================================================== */
+    /*=================================================*/
+    /* desktop */
+/*=================================================*/
 
     char desktop[MAX_PATH];
 
@@ -304,19 +442,55 @@ int WINAPI WinMain(
         desktop
     );
 
-    /* =====================================================
-       nome
-    ===================================================== */
+    /*=================================================*/
+    /* extrai nome base */
+    /*=================================================*/
 
     char name[MAX_PATH];
 
-    lstrcpy(name, PathFindFileNameA(full));
+    lstrcpyA(
+        name,
+        PathFindFileNameA(full)
+    );
 
     PathRemoveExtensionA(name);
 
-    /* =====================================================
-       shortcut path
-    ===================================================== */
+    /*=================================================*/
+    /* workdir */
+    /*=================================================*/
+
+    char workdir[MAX_PATH];
+
+    lstrcpyA(
+        workdir,
+        full
+    );
+
+    PathRemoveFileSpecA(workdir);
+
+    /*=================================================*/
+    /* CRC16 do CONTEUDO do arquivo */
+    /*=================================================*/
+
+    unsigned short crc = crc16_file(full);
+
+    /*=================================================*/
+    /* conf path */
+    /*=================================================*/
+
+    char conf[MAX_PATH];
+
+    wsprintfA(
+        conf,
+        "%s%s_%04X.conf",
+        CONF_DIR,
+        name,
+        crc
+    );
+
+    /*=================================================*/
+    /* shortcut path */
+    /*=================================================*/
 
     char shortcut[MAX_PATH];
 
@@ -326,109 +500,228 @@ int WINAPI WinMain(
         shortcut
     );
 
-    /* =====================================================
-       working dir
-    ===================================================== */
+    /*=================================================*/
+    /* COM */
+/*=================================================*/
 
-    char workdir[MAX_PATH];
+    /* garante que CONF dir e gameicons existem */
+    CreateDirectoryA(CONF_DIR, NULL);
+    CreateDirectoryA(ICON_DIR, NULL);
 
-    lstrcpy(workdir, full);
-
-    PathRemoveFileSpecA(workdir);
-
-    /* =====================================================
-       destino do atalho
-    ===================================================== */
-
-    char final_target[MAX_PATH];
-
-    lstrcpy(final_target, full);
-
-    /* =====================================================
-       16-BIT => cria BAT
-    ===================================================== */
-
-    if (!is_pe32(full))
+    /* copia config padrao se nao existir (NTVDBM/WINBOX precisam dela) */
+    if(
+        GetFileAttributesA(conf)
+        ==
+        INVALID_FILE_ATTRIBUTES
+    )
     {
-        create_bat(
-            full,
-            final_target
+        CopyFileA(
+            DEFAULT_CONF,
+            conf,
+            FALSE
         );
     }
 
-    /* =====================================================
-       COM
-    ===================================================== */
 
     CoInitialize(NULL);
 
     IShellLinkA *psl;
 
-    HRESULT hr = CoCreateInstance(
-        &CLSID_ShellLink,
-        NULL,
-        CLSCTX_INPROC_SERVER,
-        &IID_IShellLinkA,
-        (LPVOID*)&psl
-    );
+    HRESULT hr=
+        CoCreateInstance(
+            &CLSID_ShellLink,
+            NULL,
+            CLSCTX_INPROC_SERVER,
+            &IID_IShellLinkA,
+            (LPVOID*)&psl
+        );
 
-    if (SUCCEEDED(hr))
+    if(SUCCEEDED(hr))
     {
-        psl->lpVtbl->SetPath(
-            psl,
-            final_target
-        );
+        int type = exe_type(full);
 
-        psl->lpVtbl->SetWorkingDirectory(
-            psl,
-            workdir
-        );
+        /*=================================================*/
+        /* DOS -> NTVDBM */
+        /*=================================================*/
 
-        /* =================================================
-           ÍCONE
-        ================================================= */
-
-        if (is_pe32(full) && has_icon(full))
+        if(type == TYPE_DOS || is_com(full))
         {
-            /* usa ícone do próprio EXE */
-
-            psl->lpVtbl->SetIconLocation(
+            psl->lpVtbl->SetPath(
                 psl,
-                full,
-                0
+                NTVDBM_PATH
             );
+
+            char args[4096];
+
+            _snprintf(
+                args,
+                sizeof(args),
+                "-conf \"%s\" "
+                "-exit "
+                "-c \"mount c '%s'\" "
+                "-c \"c:\" "
+                "-c \"%s\" "
+                "-c \"exit\"",
+                conf,
+                workdir,
+                PathFindFileNameA(full)
+            );
+
+            psl->lpVtbl->SetArguments(
+                psl,
+                args
+            );
+
+            psl->lpVtbl->SetWorkingDirectory(
+                psl,
+                workdir
+            );
+
+            /* usa default-dos.ico */
+            {
+                char iconpath[MAX_PATH];
+                build_icon_path(full, crc, iconpath);
+                psl->lpVtbl->SetIconLocation(
+                    psl,
+                    iconpath,
+                    0
+                );
+            }
         }
         else
+
+        /*=================================================*/
+        /* WIN16 -> WINBOX */
+        /*=================================================*/
+
+        if(type == TYPE_WIN16)
         {
-            /* usa gameicons */
-
-            char iconpath[MAX_PATH];
-
-            build_icon_path(
-                full,
-                iconpath
-            );
-
-            psl->lpVtbl->SetIconLocation(
+            psl->lpVtbl->SetPath(
                 psl,
-                iconpath,
-                0
+                WINBOX_PATH
             );
+
+            char args[4096];
+
+            _snprintf(
+                args,
+                sizeof(args),
+                "-conf \"%s\" "
+                "-exit "
+                "-c \"mount c '%s'\" "
+                "-c \"mount w '%s'\" "
+                "-c \"w:\" "
+                "-c \"win\"",
+                conf,
+                workdir,
+                WINBOX_DIR
+            );
+
+            psl->lpVtbl->SetArguments(
+                psl,
+                args
+            );
+
+            psl->lpVtbl->SetWorkingDirectory(
+                psl,
+                workdir
+            );
+
+            /* usa default-win16.ico */
+            {
+                char iconpath[MAX_PATH];
+                build_icon_path(full, crc, iconpath);
+                psl->lpVtbl->SetIconLocation(
+                    psl,
+                    iconpath,
+                    0
+                );
+            }
+        }
+        else
+
+        /*=================================================*/
+        /* WIN32 -> atalho direto para o executavel */
+        /* (handler do registro ja redireciona via HDL) */
+        /*=================================================*/
+
+        {
+            psl->lpVtbl->SetPath(
+                psl,
+                full
+            );
+
+            /* sem argumentos extras */
+
+            psl->lpVtbl->SetArguments(
+                psl,
+                ""
+            );
+
+            psl->lpVtbl->SetWorkingDirectory(
+                psl,
+                workdir
+            );
+
+            /*=================================================*/
+            /* ICON */
+            /*=================================================*/
+
+            if(has_icon(full))
+            {
+                psl->lpVtbl->SetIconLocation(
+                    psl,
+                    full,
+                    0
+                );
+            }
+            else
+            {
+                char iconpath[MAX_PATH];
+
+                /* tenta .ico local */
+
+                if(find_local_icon(full, iconpath))
+                {
+                    psl->lpVtbl->SetIconLocation(
+                        psl,
+                        iconpath,
+                        0
+                    );
+                }
+                else
+                {
+                    /* fallback CRC */
+
+                    build_icon_path(
+                        full,
+                        crc,
+                        iconpath
+                    );
+
+                    psl->lpVtbl->SetIconLocation(
+                        psl,
+                        iconpath,
+                        0
+                    );
+                }
+            }
         }
 
-        /* =================================================
-           salvar
-        ================================================= */
+        /*=================================================*/
+        /* save */
+        /*=================================================*/
 
         IPersistFile *ppf;
 
-        hr = psl->lpVtbl->QueryInterface(
-            psl,
-            &IID_IPersistFile,
-            (LPVOID*)&ppf
-        );
+        hr=
+            psl->lpVtbl->QueryInterface(
+                psl,
+                &IID_IPersistFile,
+                (LPVOID*)&ppf
+            );
 
-        if (SUCCEEDED(hr))
+        if(SUCCEEDED(hr))
         {
             WCHAR wsz[MAX_PATH];
 

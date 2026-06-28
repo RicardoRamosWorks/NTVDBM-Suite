@@ -1,51 +1,95 @@
 #define INITGUID
 
+#include <initguid.h>
 #include <windows.h>
 #include <shlobj.h>
+#include <shlwapi.h>
 #include <objbase.h>
 #include <stdio.h>
 #include <string.h>
 
-#define DOSBOX_PATH  "C:\\WINDOWS\\SYSTEM32\\DOSBox.exe"
-#define DEFAULT_CONF "C:\\WINDOWS\\SYSTEM32\\dosbox.conf"
+/*=====================================================*/
+/* DEBUG LOG */
+/*=====================================================*/
+
+void debug_log(const char *msg)
+{
+    FILE *f = fopen(
+        "C:\\WINDOWS\\SYSTEM32\\HDL_DEBUG.LOG",
+        "a"
+    );
+
+    if(!f)
+        return;
+
+    fprintf(f, "%s\r\n", msg);
+    fclose(f);
+}
+
+#define NTVDBM_PATH  "C:\\WINDOWS\\SYSTEM32\\NTVDBM.EXE"
+#define WINBOX_PATH  "C:\\WINDOWS\\SYSTEM32\\WINBOX.EXE"
+
+#define DEFAULT_CONF "C:\\WINDOWS\\SYSTEM32\\NTVDBM.CONF"
 #define CONF_DIR     "C:\\WINDOWS\\SYSTEM32\\CONF\\"
 
-#define TYPE_DOS    0
-#define TYPE_WIN32  1
+#define WINBOX_DIR   "C:\\WINDOWS\\SYSTEM32\\WINBOX"
+#define WIN_INI      "C:\\WINDOWS\\SYSTEM32\\WINBOX\\WIN.INI"
+
+#define TYPE_DOS     0
+#define TYPE_WIN32   1
+#define TYPE_WIN16   2
 
 
 /*=====================================================*/
-/* CRC16 */
+/* CRC16 - file content */
 /*=====================================================*/
 
-unsigned short crc16_string(const char *s)
+unsigned short crc16_file(const char *path)
 {
-    unsigned short crc=0xFFFF;
+    FILE *f = fopen(path,"rb");
 
-    while(*s)
+    if(!f)
+        return 0;
+
+    unsigned short crc = 0xFFFF;
+
+    unsigned char buffer[4096];
+
+    size_t rd;
+
+    while((rd = fread(buffer,1,sizeof(buffer),f)) > 0)
     {
-        crc^=(unsigned char)*s++;
+        size_t i;
 
-        for(int i=0;i<8;i++)
+        for(i = 0; i < rd; i++)
         {
-            if(crc&1)
-                crc=(crc>>1)^0xA001;
-            else
-                crc>>=1;
+            crc ^= buffer[i];
+
+            int j;
+
+            for(j = 0; j < 8; j++)
+            {
+                if(crc & 1)
+                    crc = (crc >> 1) ^ 0xA001;
+                else
+                    crc >>= 1;
+            }
         }
     }
+
+    fclose(f);
 
     return crc;
 }
 
 
 /*=====================================================*/
-/* .COM => DOS sempre */
+/* .COM sempre DOS */
 /*=====================================================*/
 
 int is_com(const char *path)
 {
-    const char *e=strrchr(path,'.');
+    const char *e = strrchr(path,'.');
 
     if(!e)
         return 0;
@@ -60,74 +104,62 @@ int is_com(const char *path)
 
 int exe_type(const char *path)
 {
-    FILE *f=fopen(path,"rb");
+    FILE *f = fopen(path,"rb");
 
     if(!f)
         return TYPE_DOS;
 
-    unsigned short mz;
+    unsigned char mz[2];
 
-    if(fread(&mz,2,1,f)!=1)
+    if(fread(mz,1,2,f)!=2)
     {
         fclose(f);
         return TYPE_DOS;
     }
 
-    if(mz!=0x5A4D)
+    if(mz[0]!='M' || mz[1]!='Z')
     {
         fclose(f);
         return TYPE_DOS;
     }
-
-    fseek(f,0,SEEK_END);
-
-    long size=ftell(f);
-
-    unsigned int peofs=0;
 
     fseek(f,0x3C,SEEK_SET);
 
-    fread(&peofs,4,1,f);
+    unsigned int ofs = 0;
 
-    if(peofs<64 || peofs>(size-4))
-    {
-        fclose(f);
-        return TYPE_DOS;
-    }
+    fread(&ofs,4,1,f);
 
-    fseek(f,peofs,SEEK_SET);
+    fseek(f,ofs,SEEK_SET);
 
-    unsigned char sig[4]={0};
+    unsigned char sig[2] = {0};
 
-    fread(sig,1,4,f);
+    fread(sig,1,2,f);
 
     fclose(f);
 
-    if(
-        sig[0]=='P' &&
-        sig[1]=='E' &&
-        sig[2]==0 &&
-        sig[3]==0
-    )
+    if(sig[0]=='P' && sig[1]=='E')
         return TYPE_WIN32;
+
+    if(sig[0]=='N' && sig[1]=='E')
+        return TYPE_WIN16;
 
     return TYPE_DOS;
 }
 
 
 /*=====================================================*/
-/* pega EXE real + preserva args */
+/* pega exe real */
 /*=====================================================*/
 
 void get_real_exe(char *out)
 {
-    char *cmd=GetCommandLineA();
+    char *cmd = GetCommandLineA();
 
     if(*cmd=='"')
     {
         cmd++;
 
-        char *q=strchr(cmd,'"');
+        char *q = strchr(cmd,'"');
 
         if(!q)
         {
@@ -135,11 +167,11 @@ void get_real_exe(char *out)
             return;
         }
 
-        cmd=q+1;
+        cmd = q + 1;
     }
     else
     {
-        char *sp=strchr(cmd,' ');
+        char *sp = strchr(cmd,' ');
 
         if(!sp)
         {
@@ -147,96 +179,156 @@ void get_real_exe(char *out)
             return;
         }
 
-        cmd=sp+1;
+        cmd = sp + 1;
     }
 
     while(*cmd==' ')
         cmd++;
 
-    if(*cmd=='"')
+    lstrcpyA(out,cmd);
+
+    if(out[0]=='"')
     {
-        cmd++;
+        memmove(out,out+1,strlen(out));
 
-        char *q=strchr(cmd,'"');
+        char *q = strchr(out,'"');
 
-        if(!q)
-        {
-            out[0]=0;
-            return;
-        }
-
-        memcpy(out,cmd,q-cmd);
-
-        out[q-cmd]=0;
-    }
-    else
-    {
-        char *sp=strchr(cmd,' ');
-
-        if(sp)
-        {
-            memcpy(out,cmd,sp-cmd);
-
-            out[sp-cmd]=0;
-        }
-        else
-            lstrcpyA(out,cmd);
+        if(q)
+            *q=0;
     }
 }
 
 
 /*=====================================================*/
-/* cria config.conf.lnk */
+/* escreve shell= no WIN.INI */
 /*=====================================================*/
 
-void create_shortcut(
-    const char *target,
-    const char *shortcut
+void write_win_shell(const char *exe)
+{
+    char shell[1024];
+
+    wsprintfA(
+        shell,
+        "%s",
+        exe
+    );
+
+    WritePrivateProfileStringA(
+        "boot",
+        "shell",
+        shell,
+        WIN_INI
+    );
+}
+
+
+/*=====================================================*/
+/* pega linha de comando completa apos o HDL */
+/*=====================================================*/
+
+void get_full_cmdline(char *out)
+{
+    char *cmd = GetCommandLineA();
+
+    /* pula o caminho do proprio HDL */
+    if(*cmd == '"')
+    {
+        cmd++;
+
+        char *q = strchr(cmd, '"');
+
+        if(!q)
+        {
+            out[0] = 0;
+            return;
+        }
+
+        cmd = q + 1;
+    }
+    else
+    {
+        char *sp = strchr(cmd, ' ');
+
+        if(!sp)
+        {
+            out[0] = 0;
+            return;
+        }
+
+        cmd = sp + 1;
+    }
+
+    while(*cmd == ' ')
+        cmd++;
+
+    lstrcpyA(out, cmd);
+}
+
+
+/*=====================================================*/
+/* cria atalho .lnk para o arquivo .conf */
+/*=====================================================*/
+
+void create_conf_shortcut(
+    const char *conf_path,
+    const char *target_dir
 )
 {
+    char name[MAX_PATH];
+
+    lstrcpyA(name, PathFindFileNameA(conf_path));
+
+    PathRemoveExtensionA(name);
+
+    char shortcut_path[MAX_PATH];
+
+    wsprintfA(
+        shortcut_path,
+        "%s\\%s.lnk",
+        target_dir,
+        name
+    );
+
     CoInitialize(NULL);
 
-    IShellLink *psl;
+    IShellLinkA *psl;
 
-    if(SUCCEEDED(
+    HRESULT hr =
         CoCreateInstance(
             &CLSID_ShellLink,
             NULL,
             CLSCTX_INPROC_SERVER,
-            &IID_IShellLink,
-            (LPVOID*)&psl
-        )))
-    {
-        psl->lpVtbl->SetPath(
-            psl,
-            target
+            &IID_IShellLinkA,
+            (LPVOID *)&psl
         );
+
+    if(SUCCEEDED(hr))
+    {
+        psl->lpVtbl->SetPath(psl, conf_path);
 
         IPersistFile *ppf;
 
-        if(SUCCEEDED(
+        hr =
             psl->lpVtbl->QueryInterface(
                 psl,
                 &IID_IPersistFile,
-                (LPVOID*)&ppf
-            )))
+                (LPVOID *)&ppf
+            );
+
+        if(SUCCEEDED(hr))
         {
             WCHAR wsz[MAX_PATH];
 
             MultiByteToWideChar(
                 CP_ACP,
                 0,
-                shortcut,
+                shortcut_path,
                 -1,
                 wsz,
                 MAX_PATH
             );
 
-            ppf->lpVtbl->Save(
-                ppf,
-                wsz,
-                TRUE
-            );
+            ppf->lpVtbl->Save(ppf, wsz, TRUE);
 
             ppf->lpVtbl->Release(ppf);
         }
@@ -248,24 +340,50 @@ void create_shortcut(
 }
 
 
-
 /*=====================================================*/
 /* MAIN */
 /*=====================================================*/
 
 int WINAPI WinMain(
-HINSTANCE a,
-HINSTANCE b,
-LPSTR c,
-int d
+    HINSTANCE a,
+    HINSTANCE b,
+    LPSTR c,
+    int d
 )
 {
+    /* debug: limpa log a cada execucao */
+    FILE *flog = fopen(
+        "C:\\WINDOWS\\SYSTEM32\\HDL_DEBUG.LOG",
+        "w"
+    );
+
+    if(flog)
+    {
+        fprintf(flog, "=== HDL DEBUG ===\r\n");
+        fclose(flog);
+    }
+
+    char cmdline[4096];
+
+    lstrcpyA(cmdline, GetCommandLineA());
+
+    debug_log("--- HDL iniciado ---");
+    debug_log(cmdline);
+
+
     char exe[MAX_PATH];
 
     get_real_exe(exe);
 
+    debug_log("exe:");
+    debug_log(exe);
+
+
     if(!exe[0])
+    {
+        debug_log("ERRO: exe vazio");
         return 0;
+    }
 
 
     char self[MAX_PATH];
@@ -276,32 +394,55 @@ int d
         MAX_PATH
     );
 
-    if(
-        lstrcmpiA(
-            exe,
-            self
-        )==0
-    )
+    debug_log("self:");
+    debug_log(self);
+
+
+    if(lstrcmpiA(exe,self)==0)
+    {
+        debug_log("ERRO: exe == self (loop)");
         return 0;
+    }
 
 
     /*========================================*/
-    /* WIN32 */
+    /* identifica tipo */
+    /*========================================*/
+
+    int type = exe_type(exe);
+
+
+    /*========================================*/
+    /* WIN32 NATIVO - preserva TODOS os args */
     /*========================================*/
 
     if(
         !is_com(exe) &&
-        exe_type(exe)==TYPE_WIN32
+        type == TYPE_WIN32
     )
     {
-        STARTUPINFOA si={0};
-        PROCESS_INFORMATION pi={0};
+        char full_cmd[4096];
 
-        si.cb=sizeof(si);
+        get_full_cmdline(full_cmd);
 
-        CreateProcessA(
-            exe,
-            c,
+        debug_log("WIN32 full_cmd:");
+        debug_log(full_cmd);
+
+
+        if(!full_cmd[0])
+        {
+            debug_log("ERRO: full_cmd vazio");
+            return 0;
+        }
+
+        STARTUPINFOA si = {0};
+        PROCESS_INFORMATION pi = {0};
+
+        si.cb = sizeof(si);
+
+        BOOL ok = CreateProcessA(
+            NULL,
+            full_cmd,
             NULL,
             NULL,
             FALSE,
@@ -312,9 +453,115 @@ int d
             &pi
         );
 
+        debug_log(ok ? "CreateProcess OK" : "CreateProcess FALHOU");
+
+
+        if(!ok)
+        {
+            char errbuf[64];
+
+            wsprintfA(errbuf, "GetLastError=%lu", GetLastError());
+
+            debug_log(errbuf);
+        }
+
         return 0;
     }
 
+
+    /*========================================*/
+    /* WIN16 -> WINBOX */
+    /*========================================*/
+
+    if(
+        !is_com(exe) &&
+        type == TYPE_WIN16
+    )
+    {
+        debug_log("Tipo: WIN16");
+
+
+        char dir[MAX_PATH];
+
+        lstrcpyA(dir,exe);
+
+        char *slash = strrchr(dir,'\\');
+
+        if(!slash)
+        {
+            debug_log("ERRO: sem barra em exe");
+            return 0;
+        }
+
+        *slash = 0;
+
+
+        /*=====================================*/
+        /* shell=app */
+        /*=====================================*/
+
+        debug_log("escrevendo shell= no WIN.INI");
+        write_win_shell(exe);
+
+
+        /*=====================================*/
+        /* inicia WINBOX */
+        /*=====================================*/
+
+        char cmd[4096];
+
+        wsprintfA(
+            cmd,
+
+            "\"%s\" "
+            "-exit "
+            "-c \"mount c '%s'\" "
+            "-c \"mount w '%s'\" "
+            "-c \"w:\" "
+            "-c \"win\"",
+
+            WINBOX_PATH,
+            dir,
+            WINBOX_DIR
+        );
+
+
+        debug_log("cmd:");
+        debug_log(cmd);
+
+
+        STARTUPINFOA si = {0};
+        PROCESS_INFORMATION pi = {0};
+
+        si.cb = sizeof(si);
+
+        BOOL ok = CreateProcessA(
+            NULL,
+            cmd,
+            NULL,
+            NULL,
+            FALSE,
+            0,
+            NULL,
+            dir,   /* working dir = pasta do jogo */
+            &si,
+            &pi
+        );
+
+        debug_log(ok ? "CreateProcess OK" : "CreateProcess FALHOU");
+
+
+        if(!ok)
+        {
+            char errbuf[64];
+
+            wsprintfA(errbuf, "GetLastError=%lu", GetLastError());
+
+            debug_log(errbuf);
+        }
+
+        return 0;
+    }
 
 
     /*========================================*/
@@ -325,8 +572,7 @@ int d
 
     lstrcpyA(dir,exe);
 
-    char *slash=
-        strrchr(dir,'\\');
+    char *slash = strrchr(dir,'\\');
 
     if(!slash)
         return 0;
@@ -334,36 +580,24 @@ int d
 
     char name[MAX_PATH];
 
-    lstrcpyA(
-        name,
-        slash+1
-    );
+    lstrcpyA(name,slash+1);
 
-    *slash=0;
+    *slash = 0;
 
 
-    char folder[MAX_PATH];
+    char exename[MAX_PATH];
 
-    char *last=
-        strrchr(
-            dir,
-            '\\'
-        );
+    lstrcpyA(exename,name);
 
-    if(last)
-        lstrcpyA(
-            folder,
-            last+1
-        );
-    else
-        lstrcpyA(
-            folder,
-            dir
-        );
+    char *dot = strrchr(exename,'.');
+
+    if(dot)
+        *dot = 0;
 
 
-    unsigned short crc=
-        crc16_string(dir);
+    /* CRC16 baseado no CONTEUDO do arquivo, nao no path */
+    unsigned short crc =
+        crc16_file(exe);
 
 
     char conf[MAX_PATH];
@@ -372,10 +606,12 @@ int d
         conf,
         "%s%s_%04X.conf",
         CONF_DIR,
-        folder,
+        exename,
         crc
     );
 
+
+    CreateDirectoryA(CONF_DIR, NULL);
 
     if(
         GetFileAttributesA(conf)
@@ -386,31 +622,12 @@ int d
         CopyFileA(
             DEFAULT_CONF,
             conf,
-            TRUE
+            FALSE
         );
     }
 
-
-    char shortcut[MAX_PATH];
-
-    wsprintfA(
-        shortcut,
-        "%s\\config.conf.lnk",
-        dir
-    );
-
-
-    if(
-        GetFileAttributesA(shortcut)
-        ==
-        INVALID_FILE_ATTRIBUTES
-    )
-    {
-        create_shortcut(
-            conf,
-            shortcut
-        );
-    }
+    /* cria atalho para o .conf na pasta do exe */
+    create_conf_shortcut(conf, dir);
 
 
     SetEnvironmentVariableA(
@@ -421,34 +638,37 @@ int d
 
     char cmd[4096];
 
+    debug_log("Tipo: DOS");
+
+
     wsprintfA(
         cmd,
 
         "\"%s\" "
         "-conf \"%s\" "
-        "-noconsole "
         "-exit "
-		"-c \"echo off\" "
-		"-c \"cls\" "
         "-c \"mount c '%s'\" "
         "-c \"c:\" "
-		"-c \"cls\" "
         "-c \"%s\" "
         "-c \"exit\"",
 
-        DOSBOX_PATH,
+        NTVDBM_PATH,
         conf,
         dir,
         name
     );
 
 
-    STARTUPINFOA si={0};
-    PROCESS_INFORMATION pi={0};
+    debug_log("cmd:");
+    debug_log(cmd);
 
-    si.cb=sizeof(si);
 
-    CreateProcessA(
+    STARTUPINFOA si = {0};
+    PROCESS_INFORMATION pi = {0};
+
+    si.cb = sizeof(si);
+
+    BOOL ok = CreateProcessA(
         NULL,
         cmd,
         NULL,
@@ -456,10 +676,21 @@ int d
         FALSE,
         0,
         NULL,
-        dir,
+        dir,   /* working dir = pasta do jogo */
         &si,
         &pi
     );
+
+    debug_log(ok ? "CreateProcess OK" : "CreateProcess FALHOU");
+
+    if(!ok)
+    {
+        char errbuf[64];
+
+        wsprintfA(errbuf, "GetLastError=%lu", GetLastError());
+
+        debug_log(errbuf);
+    }
 
     return 0;
 }
