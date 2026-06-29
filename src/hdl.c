@@ -9,21 +9,18 @@
 #include <string.h>
 
 /*=====================================================*/
-/* DEBUG LOG */
+/* DEBUG LOG (arquivo aberto uma vez, sem overhead) */
 /*=====================================================*/
+
+static FILE *debug_fp = NULL;
 
 void debug_log(const char *msg)
 {
-    FILE *f = fopen(
-        "C:\\WINDOWS\\SYSTEM32\\HDL_DEBUG.LOG",
-        "a"
-    );
-
-    if(!f)
+    if(!debug_fp)
         return;
 
-    fprintf(f, "%s\r\n", msg);
-    fclose(f);
+    fprintf(debug_fp, "%s\r\n", msg);
+    fflush(debug_fp);
 }
 
 #define NTVDBM_PATH  "C:\\WINDOWS\\SYSTEM32\\NTVDBM.EXE"
@@ -123,17 +120,30 @@ int exe_type(const char *path)
         return TYPE_DOS;
     }
 
+    /* tamanho do arquivo para validacao */
+    fseek(f,0,SEEK_END);
+    long fsize = ftell(f);
+
     fseek(f,0x3C,SEEK_SET);
 
     unsigned int ofs = 0;
 
-    fread(&ofs,4,1,f);
+    /* valida: leitura OK, offset >= 0x40 (min PE/NE), cabe no arquivo */
+    if(fread(&ofs,4,1,f) != 1 || ofs < 0x40 || (long)ofs + 2 > fsize)
+    {
+        fclose(f);
+        return TYPE_DOS;
+    }
 
     fseek(f,ofs,SEEK_SET);
 
     unsigned char sig[2] = {0};
 
-    fread(sig,1,2,f);
+    if(fread(sig,1,2,f) != 2)
+    {
+        fclose(f);
+        return TYPE_DOS;
+    }
 
     fclose(f);
 
@@ -351,16 +361,15 @@ int WINAPI WinMain(
     int d
 )
 {
-    /* debug: limpa log a cada execucao */
-    FILE *flog = fopen(
+    /* debug: abre o log uma unica vez para todo o ciclo de vida */
+    debug_fp = fopen(
         "C:\\WINDOWS\\SYSTEM32\\HDL_DEBUG.LOG",
         "w"
     );
 
-    if(flog)
+    if(debug_fp)
     {
-        fprintf(flog, "=== HDL DEBUG ===\r\n");
-        fclose(flog);
+        fprintf(debug_fp, "=== HDL DEBUG ===\r\n");
     }
 
     char cmdline[4096];
@@ -691,6 +700,10 @@ int WINAPI WinMain(
 
         debug_log(errbuf);
     }
+
+    /* fecha o debug log */
+    if(debug_fp)
+        fclose(debug_fp);
 
     return 0;
 }
